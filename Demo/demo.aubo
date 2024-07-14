@@ -1,0 +1,437 @@
+---@diagnostic disable: param-type-mismatch, undefined-doc-name, undefined-global, need-check-nil, return-type-mismatch
+-------------------------- 设置部分 --------------------------
+---- Log相关设置 ----
+InfoLog = true
+WarningLog = true
+ErrorLog = true
+DebugLog = true
+TestLog = true
+-----------------------------
+
+
+---- TCP通讯相关设置 ----
+IP = "192.168.100.3"
+Port = 6000
+-----------------------------
+
+
+---- 机器人全局变量设置 ----
+Home_Point = "V_P_Home"
+Takephoto_Point = "V_P_TakePhoto"
+Take_Point = "V_P_Take"
+ReTake_Point = "V_P_ReTake"
+SetTake_Point = "V_P_SetTake"
+Drop_Point = "V_P_Drop"
+ReDrop_Point = "V_P_ReDrop"
+SetDrop_Point = "V_P_SetDrop"
+-----------------------------
+
+---- 机器人IO变量设置 ----
+Light_IO = "U_DO_10"
+Take_IO = "U_DO_11"
+-----------------------------
+
+---- 其他设置 ----
+Heith = 0.006
+RoboSpeed = 0.1
+Update_Time = 1
+---------------------------------------------------------------
+
+-------------------------- 函数声明部分 --------------------------
+
+--- 输出一条 InfoLog
+--- @param message string 打印的内容
+function Logger_Info(message)
+    if InfoLog then
+        print("[Info] " .. message)
+    end
+end
+
+--- 输出一条Warning
+--- @param  message string 打印的内容
+function Logger_Warning(message)
+    if WarningLog then
+        print('[Warning] ' .. message)
+    end
+end
+
+--- 输出一条 ErrorLog
+--- @param  message string 打印的内容
+function Logger_Error(message)
+    if ErrorLog then
+        print("[Error] " .. message)
+        error(message)
+    end
+end
+
+--- 输出一条Debug
+--- @param message string 打印的内容
+function Logger_Debug(message)
+    if DebugLog then
+        print("[Debug] " .. message)
+    end
+end
+
+--- 输出一条Test
+--- @param message string 打印的内容
+function Logger_Test(message)
+    if TestLog then
+        print("[Test] " .. message)
+    end
+end
+
+--- 输出 Table 的长度
+--- @param table table 要输出的 Table
+--- @return number leng 返回输出 Table 的长度
+function Table_Length(table)
+    local leng = 0
+    for k, v in pairs(table) do
+        leng = leng + 1
+    end
+    return leng
+end
+
+--- 获取当前点位并打印出来
+---@return any realPoint 返回机器人的实时点位
+function Get_Point(realPoint)
+    Logger_Info("Get_RealPoint 运行开始运行")
+    Logger_Debug("posX:" .. realPoint.pos.x)
+    Logger_Debug("poxY:" .. realPoint.pos.y)
+    Logger_Debug("poxZ : " .. realPoint.pos.z)
+    Logger_Debug("oriX:" .. realPoint.ori.x)
+    Logger_Debug("oriY: " .. realPoint.ori.y)
+    Logger_Debug("oriZ : " .. realPoint.ori.z)
+    Logger_Debug("oriW:" .. realPoint.ori.w)
+    Logger_Debug("joint1:" .. realPoint.joint.j1)
+    Logger_Debug("joint2:" .. realPoint.joint.j2)
+    Logger_Debug("joint3: " .. realPoint.joint.j3)
+    Logger_Debug("joint4:" .. realPoint.joint.j4)
+    Logger_Debug("joint5: " .. realPoint.joint.j5)
+    Logger_Debug("joint6 : " .. realPoint.joint.j6)
+    Logger_Info("Get_RealPoint 运行完成")
+    return realPoint
+end
+
+function Send_TCP(IP, Port, var)
+    -- 发送TCP数据
+    Logger_Info("Send_TCP 函数开始运行")
+    tcp.client.connect(IP, Port)
+    tcp.client.send_str_data(IP, Port, var)
+    Logger_Info("服务器发送成功")
+    Logger_Info("Send_TCP 函数开始运行")
+end
+
+--- 接受TCP数据
+function Recv_TCP(IP, Port)
+    local recv_str = tcp.client.recv_str_data(IP, Port)
+    Logger_Info("Recv_TCP 函数开始运行")
+    Logger_Debug("接收信息：    " .. recv_str)
+    Logger_Info("TCP点位接收脚本运行完成")
+    sleep(0.2)
+    if recv_str then
+        return Table_Split(recv_str)
+    else
+        Logger_Error("TCP客户端未收到任何数据")
+        Logger_Info("Send_TCP 函数运行完成")
+    end
+end
+
+--- 将变量赋值成机器人全局坐标点
+--- @param pname string 要接收机器人全局变量
+--- @param tp point 要传入的机器人全局变量
+function Set_TechPoint(pname, tp)
+    Logger_Info("Set_TechPoint 函数开始运行")
+    local cpstr = tp[1]
+    for i = 2, 13, 1 do
+        cpstr = cpstr .. "," .. tostring(tp[i])
+    end
+    set_global_variable(pname, cpstr)
+    Logger_Debug('赋值成功: 已经将' .. cpstr .. '赋值到' .. pname)
+    Logger_Info("Set_TechPoint 函数运行完成")
+    return true
+end
+
+--- 偏移指定机器人全局变量点位
+--- @param pointvarl string|any 转换前机器人全局变量点位
+--- @param tool_pick_posX number|nil|any 视觉传过来的机器人抓取的点位posX
+--- @param tool_pick_posY number|nil|any 视觉传过来的机器人抓取的点位posY
+--- @param RotZ number|nil|any 机器人orz点位 (默认值 0)
+--- @return boolean|point|any tp  转换后机器人全局变量点位 (默认值 0) ,逆解析失败时，返回 false
+function Point_PlaneSet(pointvarl, tool_pick_posX, tool_pick_posY, RotZ)
+    Logger_Info("Point_PlaneSet 函数开始运行")
+
+    --工具位置，根据示教器工具坐标系标定后tool位置填写（不标定工具坐标系，tool_WCS1_pos = { 0, 0, 0 }）
+    local tool_WCS1_pos = { 0, 0, 0 }
+    --工具姿态，根据示教器工具坐标系标定后tool姿态填写（不标定工具坐标系，tool_WCS1_ori = rpy2quaternion({ 0, 0, 0 }）
+    local tool_WCS1_ori = rpy2quaternion({ 0, 0, 0 })
+
+    local pick_joint = get_global_variable(pointvarl)
+    --正运动学 由6个关节角度求世界坐标值xyzabc（默认 base）
+    local tool_pick_pos, tool_pick_ori = base_to_user(pick_joint, tool_WCS1_pos, tool_WCS1_ori)
+    local tool_pick_rpy = quaternion2rpy(tool_pick_ori)
+
+    local pos_tmp = { 0, 0, 0 }
+    local rpy_tmp = { 0, 0, 0 }
+    local ori_tmp = { 0, 0, 0, 0 }
+
+    pos_tmp[1] = tool_pick_posX / 1000
+    pos_tmp[2] = tool_pick_posY / 1000
+    pos_tmp[3] = tool_pick_pos[3]
+    pos_tmp[3] = tool_pick_pos[3]
+
+
+    rpy_tmp[1] = tool_pick_rpy[1]
+    rpy_tmp[2] = tool_pick_rpy[2]
+    -- 这行代码不带角度值    人话：机械臂不转
+    rpy_tmp[3] = tool_pick_rpy[3]
+    -- 这行代码带角度值，但是极其容易出 Bug ，并且每次抓取都要重置 Take_Point
+    --rpy_tmp[3] = tool_pick_rpy[3] + RotZ
+    --这行代码带角度值，但是极其容易出，不用重置 Take_Point
+    --rpy_tmp[3] = RotZ
+    local ori_tmp = rpy2quaternion(rpy_tmp)
+
+    Logger_Debug("运行参数为")
+    Logger_Debug("pointvarl = " .. pointvarl)
+    Logger_Debug("tool_pick_posX = " .. tool_pick_posX)
+    Logger_Debug("tool_pick_posY = " .. tool_pick_posY)
+    Logger_Debug("tool_pick_posZ = " .. tool_pick_pos[3])
+    Logger_Debug("tool_pick_oriX = " .. tool_pick_rpy[1])
+    Logger_Debug("tool_pick_oriY = " .. tool_pick_rpy[2])
+    Logger_Debug("tool_pick_oriZ = " .. tool_pick_rpy[3])
+    Logger_Debug("RotZ = " .. RotZ)
+
+
+    Logger_Debug("转换值为")
+    Logger_Debug("pos_tmp[1] = " .. pos_tmp[1])
+    Logger_Debug("pos_tmp[2] = " .. pos_tmp[2])
+    Logger_Debug("pos_tmp[3] = " .. pos_tmp[3])
+    Logger_Debug("rpy_tmp[1] = " .. rpy_tmp[1])
+    Logger_Debug("rpy_tmp[2] = " .. rpy_tmp[2])
+    Logger_Debug("rpy_tmp[3] = " .. rpy_tmp[3])
+
+
+    local tp = get_target_pose({ pos_tmp[1], pos_tmp[2], pos_tmp[3] }, ori_tmp, false, tool_WCS1_pos, tool_WCS1_ori) --逆解工具坐标系在用户坐标系下的位置和姿态
+    if tp then
+        Logger_Info("逆解算成功")
+
+        Logger_Info("Point_PlaneSet 函数运行完成")
+        local result = {}
+        for i, v in ipairs(pos_tmp) do
+            table.insert(result, v)
+        end
+
+        for i, v in ipairs(ori_tmp) do
+            table.insert(result, v)
+        end
+
+        for i, v in ipairs(tp) do
+            table.insert(result, v)
+        end
+        return result
+    else
+        Logger_Error("逆解算失败")
+        error("Point_PlaneSet 函数运行完成，但逆解算失败")
+        return false
+    end
+end
+
+--- 偏移指定机器人全局变量点位
+--- @param pointvarl string|any 转换前机器人全局变量点位
+--- @param OffsetZ number|any 机器人偏移posZ点位
+--- @return boolean|point|any tp  转换后机器人全局变量点位 (默认值 0) ,逆解析失败时，返回 false
+function Point_PlaneSetZ(pointvarl, OffsetZ)
+    Logger_Info("Point_PlaneSet 函数开始运行")
+    --工具位置，根据示教器工具tool标定后位置填写（默认 flange_center  tcp）
+    local tool_WCS1_pos = { 0, 0, 0 }
+    --工具姿态，根据示教器工具tool标定后姿态填写（默认 flange_center  tcp）
+    local tool_WCS1_ori = rpy2quaternion({ 0, 0, 0 })
+
+    local pick_joint = get_global_variable(pointvarl)
+    --正运动学 由6个关节角度求世界坐标值xyzabc（默认 base）
+    local tool_pick_pos, tool_pick_ori = base_to_user(pick_joint, tool_WCS1_pos, tool_WCS1_ori)
+    local tool_pick_rpy = quaternion2rpy(tool_pick_ori)
+
+    local pos_tmp = { 0, 0, 0 }
+    local rpy_tmp = { 0, 0, 0 }
+    local ori_tmp = { 0, 0, 0, 0 }
+
+    pos_tmp[1] = tool_pick_pos[1]
+    pos_tmp[2] = tool_pick_pos[2]
+    pos_tmp[3] = tool_pick_pos[3] + OffsetZ
+    rpy_tmp[1] = tool_pick_rpy[1]
+    rpy_tmp[2] = tool_pick_rpy[2]
+    rpy_tmp[3] = tool_pick_rpy[3]
+    local ori_tmp = rpy2quaternion(rpy_tmp)
+
+    Logger_Debug("运行参数为")
+    Logger_Debug("pointvarl = " .. pointvarl)
+    Logger_Debug("OffsetZ = " .. OffsetZ)
+
+    Logger_Debug("转换值为")
+    Logger_Debug("pos_tmp[1] = " .. pos_tmp[1])
+    Logger_Debug("pos_tmp[2] = " .. pos_tmp[2])
+    Logger_Debug("pos_tmp[3] = " .. pos_tmp[3])
+    Logger_Debug("rpy_tmp[1] = " .. rpy_tmp[1])
+    Logger_Debug("rpy_tmp[2] = " .. rpy_tmp[2])
+    Logger_Debug("rpy_tmp[3] = " .. rpy_tmp[3])
+
+
+    local tp = get_target_pose({ pos_tmp[1], pos_tmp[2], pos_tmp[3] }, ori_tmp, false, tool_WCS1_pos, tool_WCS1_ori) --逆解工具坐标系在用户坐标系下的位置和姿态
+    if tp then
+        Logger_Info("逆解算成功")
+
+        Logger_Info("Point_PlaneSet 函数运行完成")
+        local result = {}
+        for i, v in ipairs(pos_tmp) do
+            table.insert(result, v)
+        end
+
+        for i, v in ipairs(ori_tmp) do
+            table.insert(result, v)
+        end
+
+        for i, v in ipairs(tp) do
+            table.insert(result, v)
+        end
+        return result
+    else
+        Logger_Error("逆解算失败")
+        error("Point_PlaneSet 函数运行完成，但逆解算失败")
+        return false
+    end
+end
+
+--- 将字符串转换为表格并排序为按特定（圆，正方形，五边形）的顺序输出一个超大表格
+--- @param Inputstring any 待序列化的原始 string
+--- @return table Outtable 序列化后的 table
+function Table_Split(Inputstring)
+    Logger_Info("table_Split 函数开始运行")
+    -- 切片掉最后面的逗号
+    Inputstring = string.sub(Inputstring, 1, -2)
+    if Inputstring == nil then
+        Logger_Warning("数据为空，请检查TCP传输结果")
+    end
+    -- if string.sub(Inputstring, -1) == "," then
+    --     Inputstring = string.sub(Inputstring, 1, -2)
+    -- end
+
+    -- 字符串转表格
+    Inputtable = 'return' .. Inputstring
+    Logger_Debug(Inputtable)
+    Inputtable = load(Inputtable)
+    Logger_Debug("table_Split 函数运行完成")
+    return Outtable
+end
+
+--- 初始化机器人
+function Initialize()
+    Logger_Info("初始化机器人")
+    set_end_maxvelc(RoboSpeed)
+    -- 将 Light_IO 设置为 1 ，人话：打开摄像头的灯
+    -- （此代码会无缘无故报错）
+    -- 这行代码怎么也运行不起来，绝对是机器人的 Bug
+    set_robot_io_status(RobotIOType.RobotBoardUserDO, Light_IO, 1)
+    Logger_Debug('机器人 ' .. Light_IO .. ' 设置为 1')
+    set_robot_io_status(RobotIOType.RobotBoardUserDO, Light_IO, 0)
+    Logger_Debug('机器人 ' .. Light_IO .. ' 设置为 0')
+    -- 重置 Take_Point ，Drop_Point 的点位
+    -- （此代码会无缘无故报错）
+    -- 这行代码怎么也运行不起来，绝对是机器人的 Bug
+    --Point_Copy(SetTake_Point,Take_Point)
+    --Point_Copy(SetDrop_Point,Drop_Point)
+end
+
+--- 让机器人到拍照点
+--- @return table pointtable|any 返回拍照后处理完成的坐标
+function TakePhoto()
+    Logger_Info("TakePhoto 函数开始运行")
+    move_line(get_global_variable(Takephoto_Point), true)
+    -- set_robot_io_status(RobotIOType.RobotBoardUserDO, Light_IO, 1)
+    sleep(0.5)
+    sleep(1)
+    set_robot_io_status(RobotIOType.RobotBoardUserDO, Light_IO, 0)
+    local pointtable = Send_TCP(IP, Port, '["TakePhoto","Done"]')
+    Logger_Info("TakePhoto 函数运行完成")
+    return pointtable
+end
+
+--- 让机器人执行装配任务
+--- @param Home_Point Point 机器人全局变量 Home点
+--- @param Take_Point Point 机器人全局变量 Take点
+--- @param ReTake_Point Point 机器人全局变量 Retake点
+--- @param Drop_Point Point 机器人全局变量 Drop点
+--- @param ReDrop_Point Point 机器人全局变量 ReDrop点
+function Assemble(Home_Point, Take_Point, ReTake_Point, Drop_Point, ReDrop_Point)
+    Logger_Info("Assemble 函数开始运行")
+    move_line(get_global_variable(Home_Point), true)
+    -- Logger_Debug("机器人已到达 Home 点位")
+    -- sleep(0.5)
+    move_line(get_global_variable(ReTake_Point), true)
+    Logger_Debug("机器人已到达 ReTake 点位")
+    move_line(get_global_variable(Take_Point), true)
+    Logger_Debug("机器人已到达 Take 点位")
+    sleep(0.5)
+    -- 这行代码怎么也运行不起来，绝对是机器人的 Bug
+    set_robot_io_status(RobotIOType.RobotBoardUserDO, Take_IO, 0)
+    sleep(0.5)
+    Logger_Debug('机器人 ' .. Take_IO .. ' 设置为 0')
+    sleep(2)
+    move_line(get_global_variable(ReTake_Point), true)
+    Logger_Debug("机器人已到达 ReTake 点位")
+    move_line(get_global_variable(ReDrop_Point), true)
+    Logger_Debug("机器人已到达 ReDrop 点位")
+    move_line(get_global_variable(Drop_Point), true)
+    Logger_Debug("机器人已到达 Drop 点位")
+    sleep(0.5)
+    Logger_Debug("机器人已到达 ReDrop 点位")
+    move_line(get_global_variable(Drop_Point), true)
+    sleep(1)
+    -- 这行代码怎么也运行不起来，绝对是机器人的 Bug
+    set_robot_io_status(RobotIOType.RobotBoardUserDO, Take_IO, 1)
+    sleep(1)
+    Logger_Debug('机器人 ' .. Take_IO .. ' 设置为 1')
+    move_line(get_global_variable(Home_Point), true)
+    Logger_Debug("机器人已到达 Home 点位")
+    sleep(0.5)
+    Logger_Info("Assemble 函数运行完成")
+end
+
+--- 更新机器人各个全局变量点位的数据
+--- @param pointtable table 带有坐标数据的 table
+function Update_Point(pointtable)
+    -- 重置 Take_Point （此代码会无缘无故报错）
+    --Point_Copy(SetTake_Point,Take_Point)
+    Set_TechPoint(Take_Point,
+        Point_PlaneSet(Take_Point, pointtable[Update_Time][2], pointtable[Update_Time][3], pointtable[Update_Time][4]))
+    Set_TechPoint(ReTake_Point,
+        Point_PlaneSet(ReTake_Point, pointtable[Update_Time][2], pointtable[Update_Time][3], pointtable[Update_Time][4]))
+    Set_TechPoint(Drop_Point, Point_PlaneSetZ(Drop_Point, Heith))
+    --Set_TechPoint(ReDrop_Point,Point_PlaneSet(ReDrop_Point,nil,nil,nil,nil))  -- 这行代码不用改
+end
+
+--- 复制指定机器人全局变量点位
+--- @param pointvarl string|any 复制前机器人全局变量点位
+--- @param pname string|nil|any 复制后机器人全局变量点位
+--- @return boolean|point|any tp  转换后机器人全局变量点位 (默认值 0) ,逆解析失败时，返回 false
+function Point_Copy(pointvarl, pname)
+    Logger_Info("Point_Copy 函数开始运行")
+    set_global_variable(pname, "")
+    Point = Point_PlaneSetZ(pointvarl, 0)
+    Set_TechPoint(pname, Point)
+    Logger_Info("Point_Copy 函数开始结束")
+end
+
+---------------------------------------------------------------
+
+
+-------------------------- 主函数部分 --------------------------
+Initialize()
+-- Take_Photo_Table = TakePhoto()
+-- for update_Time = 1, Table_Length(Take_Photo_Table) do
+--     Logger_Info('正在更新机器人坐标点位  [' .. update_Time .. '/' .. Table_Length(Take_Photo_Table) .. ']')
+--     Logger_Test("Type(Take_Photo_Table)= " .. type(Take_Photo_Table))
+--     Update_Point(Take_Photo_Table)
+--     Assemble(Home_Point, Take_Point, ReTake_Point, Drop_Point, ReDrop_Point)
+--     Update_Time = update_Time + 1
+-- end
+---------------------------------------------------------------
